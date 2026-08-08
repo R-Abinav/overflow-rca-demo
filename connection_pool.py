@@ -10,6 +10,7 @@ back to the pool or their own request times out.
 import queue
 import threading
 import logging
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +38,9 @@ class ConnectionPool:
         away. Otherwise the caller blocks on the internal queue for up
         to `timeout` seconds waiting for one to be released.
         """
-        with self._lock:
-            self.active_connections += 1
         try:
-            return self.queue.get(block=True, timeout=timeout)
+            conn = self.queue.get(block=True, timeout=timeout)
         except queue.Empty:
-            with self._lock:
-                self.active_connections -= 1
             logger.error(
                 "timeout acquiring connection from pool after %dms (max_wait=%dms)",
                 timeout * 1000, timeout * 1000,
@@ -52,10 +49,29 @@ class ConnectionPool:
                 f"timeout acquiring connection from pool after {timeout * 1000}ms"
             )
 
+        with self._lock:
+            self.active_connections += 1
+        return conn
+
     def release_connection(self, conn):
         with self._lock:
             self.active_connections -= 1
         self.queue.put(conn)
+
+    @contextmanager
+    def connection(self, timeout=5):
+        """
+        Context manager that guarantees a connection acquired from the
+        pool is always returned, even if the caller raises an
+        exception while using it. This prevents connections from being
+        silently leaked (and the pool from being permanently starved)
+        when a request fails partway through.
+        """
+        conn = self.get_connection(timeout=timeout)
+        try:
+            yield conn
+        finally:
+            self.release_connection(conn)
 
     def status(self):
         with self._lock:
