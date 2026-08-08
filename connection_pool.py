@@ -37,8 +37,13 @@ class ConnectionPool:
         away. Otherwise the caller blocks on the internal queue for up
         to `timeout` seconds waiting for one to be released.
         """
+        # Check if pool is exhausted before attempting to block to prevent queue buildup
         with self._lock:
+            if self.active_connections >= self.max_connections:
+                logger.warning("Connection pool exhausted, rejecting request immediately")
+                raise TimeoutError("Connection pool exhausted")
             self.active_connections += 1
+            
         try:
             return self.queue.get(block=True, timeout=timeout)
         except queue.Empty:
