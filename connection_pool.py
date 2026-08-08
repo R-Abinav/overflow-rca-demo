@@ -37,13 +37,9 @@ class ConnectionPool:
         away. Otherwise the caller blocks on the internal queue for up
         to `timeout` seconds waiting for one to be released.
         """
-        with self._lock:
-            self.active_connections += 1
         try:
-            return self.queue.get(block=True, timeout=timeout)
+            conn = self.queue.get(block=True, timeout=timeout)
         except queue.Empty:
-            with self._lock:
-                self.active_connections -= 1
             logger.error(
                 "timeout acquiring connection from pool after %dms (max_wait=%dms)",
                 timeout * 1000, timeout * 1000,
@@ -51,6 +47,15 @@ class ConnectionPool:
             raise TimeoutError(
                 f"timeout acquiring connection from pool after {timeout * 1000}ms"
             )
+
+        # Only count a connection as "active" once it has actually been
+        # checked out of the pool. Counting threads that are merely
+        # waiting on the queue as active inflates utilization and can
+        # cause the pool to be falsely reported as EXHAUSTED, triggering
+        # unnecessary retries/backlog growth downstream.
+        with self._lock:
+            self.active_connections += 1
+        return conn
 
     def release_connection(self, conn):
         with self._lock:
