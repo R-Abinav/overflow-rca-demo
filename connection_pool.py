@@ -37,11 +37,6 @@ class ConnectionPool:
         away. Otherwise the caller blocks on the internal queue for up
         to `timeout` seconds waiting for one to be released.
         """
-        # Check queue depth to prevent memory exhaustion during contention
-        if self.queue.qsize() == 0 and self.active_connections >= self.max_connections:
-            logger.warning("Pool exhausted, rejecting request to prevent memory pressure")
-            raise TimeoutError("Pool exhausted, request rejected")
-
         with self._lock:
             self.active_connections += 1
         try:
